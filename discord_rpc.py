@@ -60,16 +60,33 @@ class DiscordRPC:
     # API publique
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _large_image(track: dict) -> str:
+        """Retourne l'URL d'image pour large_image.
+
+        Discord Rich Presence accepte les URLs externes via le préfixe
+        ``mp:external/<hash>/<url>`` mais pypresence peut passer l'URL
+        directement — Discord la proxifie automatiquement si elle est
+        publique et commence par https://.  On essaie donc d'abord la
+        thumbnail du track ; si elle est absente on tombe sur le logo
+        statique déclaré dans les assets de l'app Discord.
+        """
+        thumbnail = (track.get("thumbnail") or "").strip()
+        if thumbnail.startswith("https://"):
+            return thumbnail
+        return "musicapp_logo"
+
     def update_track(self, track: dict, position_seconds: float = 0.0, duration_seconds: float = 0.0):
         """Met à jour la présence avec le morceau en cours de lecture."""
         if not self.enabled:
             return
         now = time.time()
+        large_img = self._large_image(track)
         activity = {
             "details": (track.get("title") or "Morceau inconnu")[:128],
             "state": (track.get("artist") or "Artiste inconnu")[:128],
-            "large_image": "musicapp_logo",
-            "large_text": "MusicApp",
+            "large_image": large_img,
+            "large_text": track.get("title") or "MusicApp",
             "small_image": "play",
             "small_text": "En lecture",
         }
@@ -88,11 +105,12 @@ class DiscordRPC:
         """Affiche l'état pause pour le morceau courant."""
         if not self.enabled:
             return
+        large_img = self._large_image(track)
         activity = {
             "details": (track.get("title") or "Morceau inconnu")[:128],
             "state": (track.get("artist") or "Artiste inconnu")[:128],
-            "large_image": "musicapp_logo",
-            "large_text": "MusicApp",
+            "large_image": large_img,
+            "large_text": track.get("title") or "MusicApp",
             "small_image": "pause",
             "small_text": "En pause",
         }
