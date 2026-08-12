@@ -126,8 +126,49 @@ class MusicApiClient:
     def queue_advance(self) -> dict:
         return self.post("/api/queue/advance")
 
+    def queue_advance_random(self) -> dict:
+        """Retire un élément aléatoire de la file d'attente et le retourne
+        (équivalent 'aléatoire' de queue_advance). Pas d'endpoint dédié
+        côté serveur : on pioche un index au hasard et on le supprime."""
+        import random
+        data = self.queue_get()
+        queue = data.get("queue", [])
+        if not queue:
+            return {"track": None}
+        index = random.randrange(len(queue))
+        track = queue[index]
+        self.queue_delete(index)
+        return {"track": track}
+
     def queue_delete(self, index: int) -> dict:
         return self.delete(f"/api/queue/{index}")
+
+    def queue_clear(self):
+        """Vide entièrement la file d'attente. Pas d'endpoint dédié côté
+        serveur : on supprime le premier élément en boucle jusqu'à ce que
+        la file soit vide."""
+        while True:
+            data = self.queue_get()
+            queue = data.get("queue", [])
+            if not queue:
+                break
+            self.queue_delete(0)
+
+    def queue_reorder(self, from_index: int, to_index: int) -> dict:
+        """Déplace un élément de la file d'attente. Pas d'endpoint dédié
+        côté serveur : on récupère la file, on réordonne localement, puis
+        on la reconstruit (delete-all + re-add dans le nouvel ordre)."""
+        data = self.queue_get()
+        queue = list(data.get("queue", []))
+        if not (0 <= from_index < len(queue)) or not (0 <= to_index < len(queue)):
+            return {"queue": queue}
+        track = queue.pop(from_index)
+        queue.insert(to_index, track)
+        for i in range(len(data.get("queue", []))):
+            self.queue_delete(0)
+        for track in queue:
+            self.queue_add(track)
+        return {"queue": queue}
 
     # ------------------------------------------------------------------
     # Comptes / sessions

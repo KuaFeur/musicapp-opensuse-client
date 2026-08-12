@@ -46,16 +46,41 @@ Au démarrage, l'app se connecte automatiquement à `music.linkua.me:80`
 `DEFAULT_HOST`/`DEFAULT_PORT`). En cas d'échec, un bouton "Réessayer"
 s'affiche. Une fois connecté, tu retrouves :
 
-- **Accueil**
+- **Accueil** — avec l'écoute récente (10 derniers morceaux joués,
+  historique local à la machine)
 - **Rechercher** — morceaux / albums / artistes, avec ouverture du détail
   d'un album ou d'un artiste
-- **File d'attente** — ajout, lecture, suppression, "morceau suivant"
+- **File d'attente** — ajout, lecture, suppression, réordonnancement
+  (monter/descendre), vidage complet, "morceau suivant"
 - **Playlists** — création, ajout/retrait de morceaux
 - **Compte** — connexion / inscription / déconnexion, et mise à jour du
   client
 
-La barre de lecture en bas (lecture/pause, suivant, progression, volume)
-reste visible dans toute l'app.
+La barre de lecture en bas (lecture/pause, suivant, progression, volume,
+lecture aléatoire, répétition) reste visible dans toute l'app.
+
+## Lecture aléatoire et répétition
+
+- **Aléatoire** (bouton mélangeur dans la barre de lecture) : le morceau
+  suivant est pioché au hasard dans la file d'attente plutôt que dans
+  l'ordre.
+- **Répétition** (bouton à droite du "suivant", cycle par clics) : trois
+  états — désactivée, file d'attente (relance le morceau courant quand la
+  file se vide), morceau en cours (relit le même morceau en boucle).
+
+## Écoute récente
+
+L'app garde localement (fichier `~/.config/musicapp-gtk/history.json`, ou
+`$XDG_CONFIG_HOME` si défini) les 30 derniers morceaux joués, dédupliqués
+par identifiant. Les 10 plus récents s'affichent sur l'écran d'accueil.
+C'est un historique par machine, pas synchronisé avec le compte serveur.
+
+## Cache des pochettes
+
+Les images (pochettes de morceau/album, avatars d'artiste) sont mises en
+cache en mémoire (`widgets._THUMBNAIL_CACHE`) pendant la session : une même
+pochette n'est téléchargée qu'une fois, même si elle réapparaît dans
+plusieurs vues (recherche, file d'attente, playlists…).
 
 ## Rich Presence Discord
 
@@ -95,4 +120,9 @@ remplacés sont sauvegardés dans `.backup_update/` avant écrasement.
   navigateur), stockés dans la session `requests`.
 - Fichiers principaux : `api.py` (client HTTP), `player.py` (GStreamer),
   `main_window.py` (assemblage UI), `discord_rpc.py` (Rich Presence),
-  `updater.py` (mise à jour depuis GitHub).
+  `updater.py` (mise à jour depuis GitHub), `history.py` (écoute récente).
+- La file d'attente n'a pas d'endpoints dédiés côté serveur pour le
+  réordonnancement, le vidage ou le tirage aléatoire : ces opérations sont
+  reconstruites côté client dans `api.py` à partir des routes existantes
+  (`queue_get`/`queue_add`/`queue_delete`), ce qui implique plusieurs
+  requêtes successives pour une seule action utilisateur.

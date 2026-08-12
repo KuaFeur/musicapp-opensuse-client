@@ -18,9 +18,23 @@ from gi.repository import Gtk, Adw, GLib, GdkPixbuf, Gio  # noqa: E402
 import requests
 
 
+# Cache mémoire des textures déjà téléchargées, partagé par tous les
+# widgets de l'app (avatars de morceau, cartes album/artiste, barre de
+# lecture…). Évite de retélécharger la même pochette à chaque fois qu'un
+# widget est recréé (changement d'onglet, rafraîchissement de liste, etc.).
+_THUMBNAIL_CACHE: dict[str, object] = {}
+_THUMBNAIL_CACHE_MAX = 500  # évite une croissance illimitée sur une longue session
+
+
 def load_thumbnail_async(avatar_or_picture, url: str, is_picture: bool = False):
-    """Charge une image distante dans un Adw.Avatar (custom-image) ou Gtk.Picture."""
+    """Charge une image distante dans un Adw.Avatar (custom-image) ou Gtk.Picture.
+    Sert d'abord depuis le cache mémoire si l'image a déjà été chargée."""
     if not url:
+        return
+
+    cached = _THUMBNAIL_CACHE.get(url)
+    if cached is not None:
+        _apply_texture(avatar_or_picture, cached, is_picture)
         return
 
     def worker():
@@ -31,21 +45,28 @@ def load_thumbnail_async(avatar_or_picture, url: str, is_picture: bool = False):
             loader.write(resp.content)
             loader.close()
             pixbuf = loader.get_pixbuf()
-            texture = Gio.BytesIcon.new  # placeholder to keep import used
             from gi.repository import Gdk
             gtexture = Gdk.Texture.new_for_pixbuf(pixbuf)
-            GLib.idle_add(_apply, gtexture)
+
+            if len(_THUMBNAIL_CACHE) >= _THUMBNAIL_CACHE_MAX:
+                # Purge simple : on vide tout plutôt que de gérer un LRU,
+                # le coût de re-télécharger occasionnellement est faible.
+                _THUMBNAIL_CACHE.clear()
+            _THUMBNAIL_CACHE[url] = gtexture
+
+            GLib.idle_add(_apply_texture, avatar_or_picture, gtexture, is_picture)
         except Exception:
             pass
 
-    def _apply(texture):
-        if is_picture:
-            avatar_or_picture.set_paintable(texture)
-        else:
-            avatar_or_picture.set_custom_image(texture)
-        return False
-
     threading.Thread(target=worker, daemon=True).start()
+
+
+def _apply_texture(avatar_or_picture, texture, is_picture: bool):
+    if is_picture:
+        avatar_or_picture.set_paintable(texture)
+    else:
+        avatar_or_picture.set_custom_image(texture)
+    return False
 
 
 class TrackRow(Gtk.Box):

@@ -24,6 +24,8 @@ from playlists_view import PlaylistsView
 from account_view import AccountView
 from player_bar import PlayerBar
 from discord_rpc import DiscordRPC
+from widgets import TrackRow
+import history
 import updater
 
 
@@ -66,6 +68,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.player.connect("state-changed", self._on_player_state_changed)
 
         self.current_track = None
+        self.shuffle_enabled = False
+        self.repeat_mode = "off"  # "off" | "all" | "one"
         self.connect("close-request", self._on_close_request)
 
         self._auto_connect()
@@ -186,6 +190,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.player,
             on_next=self._on_next_clicked,
             on_add_to_playlist=self._open_add_to_playlist,
+            on_shuffle_toggled=self._on_shuffle_toggled,
+            on_repeat_toggled=self._on_repeat_toggled,
         )
         outer_box.append(self.player_bar)
 
@@ -232,10 +238,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.nav_listbox.select_row(self.nav_listbox.get_row_at_index(0))
 
     def _build_home_view(self):
+        scrolled = Gtk.ScrolledWindow(vexpand=True)
+
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         box.set_margin_top(24)
         box.set_margin_start(24)
         box.set_margin_end(24)
+        box.set_margin_bottom(24)
+        scrolled.set_child(box)
 
         title = Gtk.Label(label="Bienvenue", xalign=0)
         title.add_css_class("title-1")
@@ -255,7 +265,40 @@ class MainWindow(Adw.ApplicationWindow):
         search_btn.connect("clicked", lambda *_: self._select_nav("search"))
         box.append(search_btn)
 
-        return box
+        recent_label = Gtk.Label(label="Écouté récemment", xalign=0)
+        recent_label.add_css_class("title-3")
+        recent_label.set_margin_top(18)
+        box.append(recent_label)
+
+        self.recent_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.append(self.recent_box)
+
+        self._refresh_recent()
+
+        return scrolled
+
+    def _refresh_recent(self):
+        child = self.recent_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self.recent_box.remove(child)
+            child = nxt
+
+        recent = history.get_recent(10)
+        if not recent:
+            placeholder = Gtk.Label(label="Aucune écoute pour l'instant.", xalign=0)
+            placeholder.add_css_class("dim-label")
+            self.recent_box.append(placeholder)
+            return
+
+        for track in recent:
+            row = TrackRow(
+                track,
+                on_play=self.play_track,
+                on_queue=self._queue_track,
+                on_add_to_playlist=self._open_add_to_playlist,
+            )
+            self.recent_box.append(row)
 
     def _select_nav(self, key):
         for i in range(len(NAV_ITEMS)):
@@ -269,7 +312,9 @@ class MainWindow(Adw.ApplicationWindow):
             return
         key = row.nav_key
         self.view_stack.set_visible_child_name(key)
-        if key == "queue":
+        if key == "home":
+            self._refresh_recent()
+        elif key == "queue":
             self.queue_view.refresh()
         elif key == "playlists":
             self.playlists_view.refresh()
@@ -287,6 +332,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.player.load(url, autoplay=True)
         self._add_toast(f"Lecture : {track.get('title', '')}")
         self.discord_rpc.update_track(track)
+        history.add_track(track)
+        if hasattr(self, "recent_box"):
+            self._refresh_recent()
+
+    def _on_shuffle_toggled(self, enabled: bool):
+        self.shuffle_enabled = enabled
+
+    def _on_repeat_toggled(self, mode: str):
+        self.repeat_mode = mode
 
     def _on_player_state_changed(self, _player, state):
         if not self.current_track:
@@ -320,10 +374,19 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_next_clicked(self):
         def worker():
             try:
-                data = self.api.queue_advance()
+                if self.shuffle_enabled:
+                    data = self.api.queue_advance_random()
+                else:
+                    data = self.api.queue_advance()
                 track = data.get("track")
                 if track:
                     GLib.idle_add(self.play_track, track)
+                elif self.repeat_mode == "all" and self.current_track:
+                    # File vide mais répétition de la file active : on
+                    # relance simplement le morceau courant (le serveur ne
+                    # connaissant pas l'historique complet de la file, on
+                    # ne peut pas reconstituer l'ordre original).
+                    GLib.idle_add(self.play_track, self.current_track)
                 else:
                     GLib.idle_add(lambda: self._add_toast("File d'attente vide"))
             except Exception as exc:
@@ -332,6 +395,9 @@ class MainWindow(Adw.ApplicationWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_track_ended(self, _player):
+        if self.repeat_mode == "one" and self.current_track:
+            self.play_track(self.current_track)
+            return
         self._on_next_clicked()
 
     def _on_player_error(self, _player, message):

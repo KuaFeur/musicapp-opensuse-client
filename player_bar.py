@@ -23,13 +23,17 @@ def format_time(seconds: float) -> str:
 
 
 class PlayerBar(Gtk.Box):
-    def __init__(self, player, on_next, on_add_to_playlist=None):
+    def __init__(self, player, on_next, on_add_to_playlist=None, on_shuffle_toggled=None, on_repeat_toggled=None):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.player = player
         self.on_next = on_next
         self.on_add_to_playlist = on_add_to_playlist
+        self.on_shuffle_toggled = on_shuffle_toggled
+        self.on_repeat_toggled = on_repeat_toggled
         self.current_track = None
         self._seeking = False
+        # Cycle du mode répétition : "off" -> "all" -> "one" -> "off" ...
+        self._repeat_mode = "off"
 
         self.add_css_class("toolbar")
         self.set_margin_top(6)
@@ -66,6 +70,12 @@ class PlayerBar(Gtk.Box):
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.CENTER)
         center_box.append(controls)
 
+        self.shuffle_button = Gtk.ToggleButton(icon_name="media-playlist-shuffle-symbolic")
+        self.shuffle_button.add_css_class("flat")
+        self.shuffle_button.set_tooltip_text("Lecture aléatoire")
+        self.shuffle_button.connect("toggled", self._on_shuffle_toggled)
+        controls.append(self.shuffle_button)
+
         self.play_button = Gtk.Button(icon_name="media-playback-start-symbolic")
         self.play_button.add_css_class("circular")
         self.play_button.connect("clicked", self._on_play_pause)
@@ -75,6 +85,12 @@ class PlayerBar(Gtk.Box):
         self.next_button.add_css_class("flat")
         self.next_button.connect("clicked", lambda *_: self.on_next())
         controls.append(self.next_button)
+
+        self.repeat_button = Gtk.Button(icon_name="media-playlist-repeat-symbolic")
+        self.repeat_button.add_css_class("flat")
+        self.repeat_button.set_tooltip_text("Répétition : désactivée")
+        self.repeat_button.connect("clicked", self._on_repeat_clicked)
+        controls.append(self.repeat_button)
 
         if self.on_add_to_playlist is not None:
             self.add_button = Gtk.Button(icon_name="bookmark-new-symbolic")
@@ -145,6 +161,29 @@ class PlayerBar(Gtk.Box):
             self.player.pause()
         else:
             self.player.play()
+
+    def _on_shuffle_toggled(self, button):
+        if self.on_shuffle_toggled:
+            self.on_shuffle_toggled(button.get_active())
+
+    def _on_repeat_clicked(self, *_args):
+        order = ["off", "all", "one"]
+        self._repeat_mode = order[(order.index(self._repeat_mode) + 1) % len(order)]
+        icon = "media-playlist-repeat-song-symbolic" if self._repeat_mode == "one" else "media-playlist-repeat-symbolic"
+        self.repeat_button.set_icon_name(icon)
+        self.repeat_button.set_state_flags(
+            Gtk.StateFlags.CHECKED if self._repeat_mode != "off" else Gtk.StateFlags.NORMAL, True
+        )
+        label = {"off": "désactivée", "all": "file d'attente", "one": "morceau en cours"}[self._repeat_mode]
+        self.repeat_button.set_tooltip_text(f"Répétition : {label}")
+        if self.on_repeat_toggled:
+            self.on_repeat_toggled(self._repeat_mode)
+
+    def get_repeat_mode(self) -> str:
+        return self._repeat_mode
+
+    def is_shuffle_on(self) -> bool:
+        return self.shuffle_button.get_active()
 
     def _on_state_changed(self, _player, state):
         icon = "media-playback-pause-symbolic" if state == "playing" else "media-playback-start-symbolic"
