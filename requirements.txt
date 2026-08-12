@@ -1,0 +1,3 @@
+requests>=2.31
+PyGObject>=3.48
+pypresence>=4.6
