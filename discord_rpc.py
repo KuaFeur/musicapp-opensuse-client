@@ -26,7 +26,7 @@ except ImportError:  # pypresence non installé
 # tien si tu as créé/veux créer ta propre application sur
 # https://discord.com/developers/applications (onglet "Rich Presence" pour
 # les assets d'image large_image/small_image).
-DEFAULT_CLIENT_ID = "1141326322984017930"
+DEFAULT_CLIENT_ID = "1503878289939234928"
 
 _RECONNECT_DELAY = 15  # secondes entre deux tentatives de reconnexion
 
