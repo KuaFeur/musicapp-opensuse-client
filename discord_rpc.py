@@ -11,6 +11,8 @@ fonctionner normalement (le RPC est simplement désactivé).
 
 from __future__ import annotations
 
+import glob
+import os
 import threading
 import time
 
@@ -29,6 +31,30 @@ except ImportError:  # pypresence non installé
 DEFAULT_CLIENT_ID = "1503878289939234928"
 
 _RECONNECT_DELAY = 15  # secondes entre deux tentatives de reconnexion
+
+# pypresence cherche le socket discord-ipc-N uniquement dans
+# $XDG_RUNTIME_DIR (ou /tmp en repli). Sur Linux, si Discord tourne en
+# Flatpak ou Snap, le socket réel est isolé dans un sous-dossier propre
+# au sandbox et n'apparaît jamais à cet emplacement standard. On liste
+# ici tous les emplacements connus, du plus courant au plus rare.
+def _candidate_ipc_dirs() -> list[str]:
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return [
+        runtime_dir,                                                  # install native (rpm/deb/tar)
+        os.path.join(runtime_dir, "app", "com.discordapp.Discord"),   # Flatpak stable
+        os.path.join(runtime_dir, "app", "com.discordapp.DiscordCanary"),
+        os.path.join(runtime_dir, "app", "com.discordapp.DiscordPTB"),
+        os.path.join(runtime_dir, "snap.discord"),                    # Snap
+        "/tmp",                                                       # repli historique pypresence
+    ]
+
+
+def _find_discord_ipc_dir() -> str | None:
+    """Retourne le dossier contenant un socket discord-ipc-N valide, ou None."""
+    for directory in _candidate_ipc_dirs():
+        if glob.glob(os.path.join(directory, "discord-ipc-*")):
+            return directory
+    return None
 
 
 class DiscordRPC:
@@ -138,6 +164,22 @@ class DiscordRPC:
     # ------------------------------------------------------------------
 
     def _connect(self) -> bool:
+        ipc_dir = _find_discord_ipc_dir()
+        if ipc_dir is None:
+            # Aucun socket discord-ipc-* trouvé nulle part : Discord
+            # n'est probablement pas lancé. On ne tente même pas la
+            # connexion pour éviter une exception pypresence bruyante.
+            self._rpc = None
+            self._connected = False
+            return False
+
+        # pypresence lit XDG_RUNTIME_DIR au moment de connect(), donc on
+        # le pointe temporairement vers le dossier où le socket a été
+        # trouvé (utile pour Flatpak/Snap dont le socket est isolé),
+        # puis on restaure la valeur d'origine pour ne pas perturber le
+        # reste de l'application.
+        original_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = ipc_dir
         try:
             self._rpc = Presence(self.client_id)
             self._rpc.connect()
@@ -147,6 +189,11 @@ class DiscordRPC:
             self._rpc = None
             self._connected = False
             return False
+        finally:
+            if original_runtime_dir is None:
+                os.environ.pop("XDG_RUNTIME_DIR", None)
+            else:
+                os.environ["XDG_RUNTIME_DIR"] = original_runtime_dir
 
     def _run(self):
         while not self._stop.is_set():
