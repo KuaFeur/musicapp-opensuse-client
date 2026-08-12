@@ -17,7 +17,6 @@ from gi.repository import Gtk, Adw, GLib  # noqa: E402
 
 from api import MusicApiClient
 from player import Player
-from connect_view import ConnectView
 from search_view import SearchView
 from detail_view import DetailView
 from queue_view import QueueView
@@ -25,6 +24,11 @@ from playlists_view import PlaylistsView
 from account_view import AccountView
 from player_bar import PlayerBar
 from discord_rpc import DiscordRPC
+import updater
+
+
+DEFAULT_HOST = "music.linkua.me"
+DEFAULT_PORT = "80"
 
 
 NAV_ITEMS = [
@@ -52,13 +56,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.root_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self.toast_overlay.set_child(self.root_stack)
 
-        # --- Écran de connexion ---
-        self.connect_view = ConnectView(self.api, self._on_connected)
-        self.root_stack.add_named(self.connect_view, "connect")
-
-        # --- Application principale (construite après connexion) ---
-        self.app_box = None
-        self.root_stack.set_visible_child_name("connect")
+        # --- Écran de chargement (connexion auto au serveur) ---
+        self.loading_page = self._build_loading_view()
+        self.root_stack.add_named(self.loading_page, "loading")
+        self.root_stack.set_visible_child_name("loading")
 
         self.player.connect("eos", self._on_track_ended)
         self.player.connect("error", self._on_player_error)
@@ -66,6 +67,59 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.current_track = None
         self.connect("close-request", self._on_close_request)
+
+        self._auto_connect()
+
+    def _build_loading_view(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_halign(Gtk.Align.CENTER)
+
+        icon = Gtk.Image.new_from_icon_name("audio-headphones-symbolic")
+        icon.set_pixel_size(64)
+        icon.add_css_class("dim-label")
+        box.append(icon)
+
+        self.loading_label = Gtk.Label(label=f"Connexion à {DEFAULT_HOST}…")
+        self.loading_label.add_css_class("title-2")
+        box.append(self.loading_label)
+
+        self.loading_spinner = Gtk.Spinner()
+        self.loading_spinner.set_spinning(True)
+        box.append(self.loading_spinner)
+
+        self.loading_retry_btn = Gtk.Button(label="Réessayer")
+        self.loading_retry_btn.add_css_class("pill")
+        self.loading_retry_btn.set_visible(False)
+        self.loading_retry_btn.connect("clicked", lambda *_: self._auto_connect())
+        box.append(self.loading_retry_btn)
+
+        return box
+
+    # ------------------------------------------------------------------
+    # Connexion automatique au serveur par défaut
+    # ------------------------------------------------------------------
+
+    def _auto_connect(self):
+        self.loading_label.set_text(f"Connexion à {DEFAULT_HOST}…")
+        self.loading_spinner.set_spinning(True)
+        self.loading_retry_btn.set_visible(False)
+        self.api.configure(DEFAULT_HOST, DEFAULT_PORT)
+
+        def worker():
+            try:
+                self.api.test_connection()
+                GLib.idle_add(self._on_connected, DEFAULT_HOST, DEFAULT_PORT)
+            except Exception as exc:
+                GLib.idle_add(self._on_connect_failed, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_connect_failed(self, error_message: str):
+        self.loading_spinner.set_spinning(False)
+        self.loading_label.set_text(f"Connexion à {DEFAULT_HOST} impossible : {error_message}")
+        self.loading_retry_btn.set_visible(True)
+        return False
 
     # ------------------------------------------------------------------
     # Connexion réussie -> construire l'UI principale
@@ -75,6 +129,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._build_main_ui()
         self.root_stack.set_visible_child_name("main")
         self._refresh_auth_state()
+        self._check_update_on_startup()
 
     def _build_main_ui(self):
         split = Adw.NavigationSplitView()
@@ -327,3 +382,43 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _add_toast(self, message: str):
         self.toast_overlay.add_toast(Adw.Toast(title=message, timeout=3))
+
+    # ------------------------------------------------------------------
+    # Mise à jour automatique au démarrage
+    # ------------------------------------------------------------------
+
+    def _check_update_on_startup(self):
+        def worker():
+            try:
+                result = updater.check_for_update()
+                if result["update_available"]:
+                    GLib.idle_add(self._on_startup_update_found, result)
+            except Exception:
+                pass  # échec silencieux : pas de perturbation au démarrage
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_startup_update_found(self, result: dict):
+        remote = result["remote"]
+
+        def do_update():
+            def worker():
+                try:
+                    updated_files = updater.apply_update(remote["sha"])
+                    GLib.idle_add(self._on_startup_update_applied, len(updated_files))
+                except Exception as exc:
+                    GLib.idle_add(
+                        lambda: self._add_toast(f"Échec de la mise à jour automatique : {exc}")
+                    )
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        toast = Adw.Toast(title="Mise à jour du client disponible, installation…", timeout=4)
+        self.add_toast(toast)
+        do_update()
+        return False
+
+    def _on_startup_update_applied(self, count: int):
+        if count:
+            self._add_toast(f"Mise à jour installée ({count} fichier(s)). Redémarre l'app pour l'appliquer.")
+        return False

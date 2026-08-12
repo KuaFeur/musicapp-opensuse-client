@@ -41,8 +41,10 @@ cas tu peux retirer `PyGObject` de `requirements.txt` et n'installer que
 python3 main.py
 ```
 
-Au démarrage, l'app demande l'**adresse IP** et le **port** du serveur
-(`app.py`) qui tourne déjà quelque part. Une fois connecté, tu retrouves :
+Au démarrage, l'app se connecte automatiquement à `music.linkua.me:80`
+(pas d'écran de connexion — l'adresse est fixée dans `main_window.py`, via
+`DEFAULT_HOST`/`DEFAULT_PORT`). En cas d'échec, un bouton "Réessayer"
+s'affiche. Une fois connecté, tu retrouves :
 
 - **Accueil**
 - **Rechercher** — morceaux / albums / artistes, avec ouverture du détail
@@ -72,13 +74,18 @@ Presence").
 
 ## Mettre à jour le client
 
-Dans l'onglet **Compte**, le bouton **Mettre à jour** vérifie le dernier
-commit de la branche `main` du dépôt
+Au démarrage, l'app vérifie silencieusement le dernier commit de la branche
+`main` du dépôt
 [KuaFeur/musicapp-opensuse-client](https://github.com/KuaFeur/musicapp-opensuse-client)
-et, si une nouvelle version est disponible, télécharge et remplace les
-fichiers `.py` du dossier de l'app. Les fichiers remplacés sont sauvegardés
-dans `.backup_update/` avant écrasement. Un redémarrage de l'app est
-nécessaire après une mise à jour pour que les changements prennent effet.
+et, si une nouvelle version est disponible, la télécharge et l'installe
+automatiquement (toast de notification, aucune action requise). Un
+redémarrage manuel de l'app est nécessaire pour que les changements
+prennent effet. Si la vérification échoue (pas de réseau, GitHub
+injoignable), l'échec est silencieux et n'affecte pas le démarrage.
+
+Le bouton **Mettre à jour** dans l'onglet **Compte** permet aussi de
+déclencher cette vérification manuellement à tout moment. Les fichiers
+remplacés sont sauvegardés dans `.backup_update/` avant écrasement.
 
 ## Notes techniques
 
